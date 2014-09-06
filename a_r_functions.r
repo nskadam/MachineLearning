@@ -5,10 +5,13 @@
 # Contents ---------------------------------------------------------------------
 # Functions for: 
 #   Machine Learning
-#   Data Visualisation 
+#   Data Visualization 
 #   Data Preprocessing
+#     Treat NAs
+#   Features Engineering
 #     PCA
 #   Text Mining
+
 
 # Load packages ----------------------------------------------------------------
 require(lattice,quietly=TRUE)
@@ -22,8 +25,9 @@ require(gbm,quietly=TRUE)
 require(h2o,quietly=TRUE)
 require(randomForest,quietly=TRUE)
 
+
 # Machine Learning Functions ---------------------------------------------------
-PrepareDataFromFlatFilesBank <- function(train.file, test.file,
+PrepareDataFromFlatFilesSampleFunction <- function(train.file, test.file,
                                          file.path=GetWorkDirData()){
   # train.file = 'bank-full.csv'; test.file = 'test.csv';file.path=GetWorkDirData()
   setwd(file.path)
@@ -53,7 +57,6 @@ LoadData <- function(data.file, dat.name.in.file= 'dat',
   train.row.count <<- train.row.count
   test.row.count <<- test.row.count
   load(data.file)
-  # dat <<- data.table(dat)
   dat <<- dat
   invisible(NULL)
 }
@@ -114,7 +117,6 @@ PlotVer <- function(){
 
 TransformData <- function(dat,  remove.low.variance.columns = TRUE,
                           na.treatment = 'No Treatment', factor.to.dummy = FALSE){
-  # modified on 2014-06-17
   # Load data
   
   #--------------------------------------------------#
@@ -125,6 +127,7 @@ TransformData <- function(dat,  remove.low.variance.columns = TRUE,
   #--------------------------------------------------#
   # set date veriable to date
   #--------------------------------------------------#
+  
   
   #--------------------------------------------------#
   # Zero / Near Zero Variance
@@ -140,7 +143,9 @@ TransformData <- function(dat,  remove.low.variance.columns = TRUE,
   # NAs display
   # sapply(dat, function(x) {sum(is.na(x))})
   
-  # treat NAs
+  #--------------------------------------------------#
+  # Treat NAs
+  #--------------------------------------------------#
   if(na.treatment == 'median'){
     for(ver in colnames(dat)){
       # cat('Working on Ver:', ver, '\n')
@@ -153,7 +158,9 @@ TransformData <- function(dat,  remove.low.variance.columns = TRUE,
   }
   # dat <- dat[complete.cases(dat),]
   
-  # factor to dummy veriables
+  #--------------------------------------------------#
+  # Factor to dummy veriables
+  #--------------------------------------------------#
   if(factor.to.dummy == TRUE){
     dat.temp <- as.data.frame(eval(parse(text=paste('model.matrix( ~ . , data = dat[,setdiff(colnames(dat),c("',id.column.name,'","',fs.target, '"))])',sep=''))))
     dat <- cbind(dat[,c(id.column.name,fs.target)],dat.temp)
@@ -930,8 +937,6 @@ EnsembleModelNNetOutput <- function(dat, save.model.dir.name = ops.save.model.di
   write.csv(output, file = 'a_ensemble nnet model test set output.csv', row.names = FALSE)
   SetWorkDirDataProcessing()
 }
-
-
 
 
 # Principle components ---------------------------------------------------------
