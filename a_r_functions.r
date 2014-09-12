@@ -115,7 +115,8 @@ PlotVer <- function(){
   
 }
 
-TransformData <- function(dat,  remove.low.variance.columns = TRUE,
+TransformData <- function(dat,  remove.low.variance.columns = FALSE, 
+                          remove.zero.variance.columns = FALSE,
                           na.treatment = 'No Treatment', factor.to.dummy = FALSE){
   # Load data
   
@@ -128,20 +129,6 @@ TransformData <- function(dat,  remove.low.variance.columns = TRUE,
   # set date veriable to date
   #--------------------------------------------------#
   
-  
-  #--------------------------------------------------#
-  # Zero / Near Zero Variance
-  #--------------------------------------------------#
-  require(caret)
-  if(remove.low.variance.columns){
-    col.numbers <- nearZeroVar(dat)
-    if(!identical(col.numbers,integer(0))){
-      dat <- dat[, -col.numbers]        
-    }
-  }
-  CreateFeatureSet()
-  # NAs display
-  # sapply(dat, function(x) {sum(is.na(x))})
   
   #--------------------------------------------------#
   # Treat NAs
@@ -158,6 +145,23 @@ TransformData <- function(dat,  remove.low.variance.columns = TRUE,
   }
   # dat <- dat[complete.cases(dat),]
   
+  
+  #--------------------------------------------------#
+  # Treat NAs: Add Dummy Veriable
+  #--------------------------------------------------#
+  CreateFeatureSet()
+  if(na.treatment == 'OneHotDot'){
+    for(ver in colnames(dat)){
+      # cat('Working on Ver:', ver, '\n')
+      if(ver != fs.target | ver !=id.column.name) { 
+          # ver = fs[2] 
+        dat[,ncol(dat)+1] <- 0
+        dat[is.na(dat[,ver]), ncol(dat)] <- 1
+        colnames(dat)[ncol(dat)] <- paste(ver,'NA', sep='_')
+        dat[is.na(dat[,ver]),ver] <- 0
+      }
+    }
+  }
   #--------------------------------------------------#
   # Factor to dummy veriables
   #--------------------------------------------------#
@@ -170,6 +174,33 @@ TransformData <- function(dat,  remove.low.variance.columns = TRUE,
   }
   
   colnames(dat) <- make.names(colnames(dat))
+  
+  
+  #--------------------------------------------------#
+  # Near Zero Variance
+  #--------------------------------------------------#
+  CreateFeatureSet()
+  require(caret)
+  if(remove.low.variance.columns){
+    col.numbers <- nearZeroVar(dat)
+    if(!identical(col.numbers,integer(0))){
+      dat <- dat[, -col.numbers]        
+    }
+  }
+  #--------------------------------------------------#
+  # Zero Variance
+  #--------------------------------------------------#
+  CreateFeatureSet()
+  require(caret)
+  if(remove.zero.variance.columns){
+    col.numbers <- sapply(dat, function(x) {length(unique(x))>1})
+    dat <- dat[, col.numbers]        
+  }
+  
+  CreateFeatureSet()
+  # NAs display
+  # sapply(dat, function(x) {sum(is.na(x))})
+  
   
   dat
 }
@@ -241,6 +272,7 @@ CreateFeatureSet <- function(include.features=NULL, remove.features=NULL,
 SaveModel <- function(model.name="", param1="", val1="", 
                       param2="", val2="", param3="", val3="", 
                       desc="",save.model.dir.name = ops.save.model.dir.name){
+  # model.name="deepnet"; param1="hidden"; val1=hidden; param2="epochs"; val2=epochs;  desc=""
   file.name <- paste("d_model = ", model.name, " & ", 
                      "n.features = ", (length(fs)-1), " & ", 
                      "p.train = ", round(length(idx.train)/train.row.count,2), " & ", 
@@ -256,7 +288,11 @@ SaveModel <- function(model.name="", param1="", val1="",
                showWarnings = FALSE)
     SetWorkDirRelativeDataProcessing(save.model.dir.name)
   }
-  save(model, file=file.name)
+  if(model.name %in% c('H2OGBM','deepnet')){
+    h2o.saveModel(model, dir = getwd(), name = file.name[1],force = TRUE)
+  }else {
+    save(model, file=file.name)
+  }
   SetWorkDirDataProcessing()
 }
 
@@ -364,6 +400,20 @@ PredictOutput <- function(){
     }      
     
   }
+  if(model.name=="H2OGBM"){
+    if(model.family =="binomial"){
+      output.train <<- as.data.frame(h2o.predict(model, train))[,1]
+      output.valid <<- as.data.frame(h2o.predict(model, valid))[,1]
+      output.test <<- as.data.frame(h2o.predict(model, test))[,1]
+    }  
+  }
+  if(model.name=="deepnet"){
+    if(model.family =="binomial"){
+      output.train <<- as.data.frame(h2o.predict(model, train)[,1])[,1]
+      output.valid <<- as.data.frame(h2o.predict(model, valid)[,1])[,1]
+      output.test <<- as.data.frame(h2o.predict(model, test[,setdiff(colnames(test),fs.target)])[,1])[,1]
+    }  
+  }
   if(convert.predected.NAs.to.mean){
     target.mean<<- mean(as.numeric(as.character(dat[idx.train, fs.target])))
     output.train[match(output.train, NA)==1] <- target.mean
@@ -377,7 +427,7 @@ PredictOutput <- function(){
 }
 
 CalculateError <- function(v.pred, v.true){
-  # v.pred <- output.valid;v.true <- dat[idx.valid, fs.target]
+  # v.pred <- output.valid; v.true <- dat[idx.valid, fs.target]
   
   #   if(length(v.pred[is.na(v.pred)])<length(v.pred)){
   #     warning( "NAs present in Predicted Values" )  
@@ -434,6 +484,7 @@ SaveOutput <- function(output.test, model.name="", param1="", val1="",
                        .model = model,.idx.train = idx.train, 
                        .train.row.count = train.row.count,
                        .fs = fs, save.model.dir.name = ops.save.model.dir.name){
+  # .model = model;.idx.train = idx.train; .train.row.count = train.row.count;.fs = fs; save.model.dir.name = ops.save.model.dir.name
   
   output.test <- as.numeric(as.character(output.test))
   
@@ -821,6 +872,117 @@ TrainNNet <- function(save.model=T){
   PredictOutput()
   SaveOutput(output.test, model.name)
   PrintOutcomeToScreen()
+}
+
+TrainH2OGBM <- function(n.trees = 30, shrinkage = 0.01, n.nodes = 11, 
+                        int.depth = 4, save.model = TRUE){
+  # n.trees = 50; shrinkage = 0.01; n.nodes = 11;  int.depth = 4
+  
+  library(h2o)
+  model.name<<- "H2OGBM"
+  time.model.start<<- proc.time()
+  
+  
+  localH2O <- h2o.init(max_mem_size=paste(memory.limit()-4000,"m",sep=''), beta=TRUE)
+  
+  train <- as.h2o(localH2O, dat[idx.train, fs], key="train.hex")
+  valid <- as.h2o(localH2O, dat[idx.valid, fs], key="valid.hex")
+  test <- as.h2o(localH2O, dat[idx.test, fs], key="test.hex")
+  
+  y <- fs.target
+  x <- setdiff(fs, fs.target)
+  fmla <- as.formula(paste(y, paste(x, collapse='+'), sep='~'))
+  
+  model <- h2o.gbm(x=x,y=y, data=train, n.trees=n.trees, shrinkage=shrinkage, 
+                       distribution='gaussian', interaction.depth = int.depth, 
+                       n.minobsinnode = n.nodes)
+  
+  if(save.model){
+    SaveModel(model.name="H2OGBM", param1="n.trees", val1=n.trees, 
+              param2="shrinkage", val2=shrinkage, param3="n.nodes", 
+              val3=n.nodes, desc="")  
+  }
+  
+  PredictOutput()
+  h2o.shutdown(localH2O, prompt = FALSE)
+  SaveOutput(output.test, model.name="H2OGBM",param1="n.trees", val1=n.trees, 
+             param2="shrinkage", val2=shrinkage, param3="n.nodes", 
+             val3=n.nodes, desc="")
+  PrintOutcomeToScreen(param1="n.trees", val1=n.trees, param2="shrinkage",
+                       val2=shrinkage, param3="n.nodes", val3=n.nodes)
+  
+}
+
+TrainGBMXBoost <- function(){
+  require(xgboost)
+  require(methods)
+  
+  
+  dtrain <- dat[idx.train,]
+  dtrain[33] <- dtrain[33] == "s"
+  label <- as.numeric(dtrain[[33]])
+  data <- as.matrix(dtrain[2:31])
+  weight <- as.numeric(dtrain[[32]]) * testsize / length(label)
+  
+  sumwpos <- sum(weight * (label==1.0))
+  sumwneg <- sum(weight * (label==0.0))
+  print(paste("weight statistics: wpos=", sumwpos, "wneg=", sumwneg, "ratio=", sumwneg / sumwpos))
+  
+  xgmat <- xgb.DMatrix(data, label = label, weight = weight, missing = -999.0)
+  param <- list("objective" = "binary:logitraw",
+                "scale_pos_weight" = sumwneg / sumwpos,
+                "bst:eta" = 0.1,
+                "bst:max_depth" = 6,
+                "eval_metric" = "auc",
+                "eval_metric" = "ams@0.15",
+                "silent" = 1,
+                "nthread" = 16)
+  watchlist <- list("train" = xgmat)
+  nround = 120
+  print ("loading data end, start to boost trees")
+  bst = xgb.train(param, xgmat, nround, watchlist );
+  # save out model
+  xgb.save(bst, "higgs.model")
+  print ('finish training')
+  
+}
+TrainH2ODeepNet <- function( hidden = c(10, 10), epochs = 5, save.model = TRUE){
+  # hidden = c(100,100);  epochs = 10
+  
+  library(h2o)
+  model.name<<- "deepnet"
+  time.model.start<<- proc.time()
+  
+  
+  localH2O <- h2o.init(max_mem_size=paste(memory.limit()-4000,"m",sep=''), beta=TRUE)
+  
+  train <- as.h2o(localH2O, dat[idx.train, fs], key="train.hex")
+  valid <- as.h2o(localH2O, dat[idx.valid, fs], key="valid.hex")
+  test <- as.h2o(localH2O, dat[idx.test, fs], key="test.hex")
+  
+  y <- fs.target
+  x <- setdiff(fs, fs.target)
+  fmla <- as.formula(paste(y, paste(x, collapse='+'), sep='~'))
+  
+  # hidden = c(100);  epochs = 10
+  model <<- h2o.deeplearning(x=x,y=y, data=train,   
+                             hidden = hidden, epochs = epochs, autoencoder = TRUE,
+                             balance_classes = TRUE, 
+                             classification = ifelse(model.family == 'binomial', TRUE, FALSE),
+                             quiet_mode = FALSE)
+  print(model)
+  if(save.model){
+    SaveModel(model.name="deepnet", param1="hidden", val1=paste(hidden,collapse = '-'), 
+              param2="epochs", val2=epochs,  desc="")  
+  }
+  
+  PredictOutput()
+  # h2o.shutdown(localH2O, prompt = FALSE)
+  SaveOutput(output.test, model.name="deepnet", param1="hidden", val1=paste(hidden,collapse = '-'), 
+             param2="epochs", val2=epochs, desc="")
+  PrintOutcomeToScreen(param1="hidden", val1=hidden, 
+                       param2="epochs", val2=epochs)
+  
 }
 
 
