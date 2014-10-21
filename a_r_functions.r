@@ -72,18 +72,23 @@ ExploreData <- function(){
   cat('\nNumber of NAs found:\n')
   flush.console()
   sapply(dat,function(x){sum(is.na(x))})
+  flush.console()
   
   cat('\nFeatures data class:\n')
   flush.console()
   print(table(sapply(dat,class)))
+  flush.console()
   
   cat('\nFactors colded as numeric:\n')
   flush.console()
   print(colnames(dat)[sapply(dat,function(x)length(unique(x))) <= nrow(dat)*0.1])
+  flush.console()
   
   cat('\nNumber of levels:\n')
   flush.console()
   sapply(dat,function(x)length(unique(x)))
+  flush.console()
+  
 }
 
 SetVerDataType <- function(numeric.to.facor.if.levles.less.than = 11){
